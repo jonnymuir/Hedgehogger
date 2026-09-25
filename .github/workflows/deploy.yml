@@ -1,0 +1,69 @@
+name: Deploy to prismreference.com
+
+# Manual dispatch only, matching jonnymuir/Umbraco.Prism's own
+# deploy-prism-reference.yml posture (start manual, prove it out, consider
+# automatic later).
+#
+# This game is served as pure static files by that app's own ASP.NET Core
+# static file middleware, straight from wwwroot/games/hedgehogger/ on disk —
+# there's no build step, no DLL involved, and no need to restart the host
+# app or its systemd service for a change to take effect. This workflow just
+# copies files onto the same VPS that already serves prismreference.com, at
+# the same path the jonnymuir/Umbraco.Prism repo used to own directly before
+# this game was extracted into its own repo.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Secrets via env first, never inlined into run: (avoids template
+      # injection into a shell step — same convention Umbraco.Prism's own
+      # deploy workflow uses).
+      PRISM_VPS_HOST: ${{ secrets.PRISM_VPS_HOST }}
+      PRISM_VPS_USERNAME: ${{ secrets.PRISM_VPS_USERNAME }}
+      PRISM_VPS_PASSWORD: ${{ secrets.PRISM_VPS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Copy game files to the VPS
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
+        with:
+          host: ${{ env.PRISM_VPS_HOST }}
+          username: ${{ env.PRISM_VPS_USERNAME }}
+          password: ${{ env.PRISM_VPS_PASSWORD }}
+          source: "index.html,game.css,js"
+          target: "/var/www/prism-reference/wwwroot/games/hedgehogger/"
+          strip_components: 0
+          overwrite: true
+
+      - name: Fix permissions
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ env.PRISM_VPS_HOST }}
+          username: ${{ env.PRISM_VPS_USERNAME }}
+          password: ${{ env.PRISM_VPS_PASSWORD }}
+          script: sudo chown -R www-data:www-data /var/www/prism-reference/wwwroot/games/hedgehogger
+
+      # Static files are read live from disk on every request — no app
+      # restart needed — so this just confirms the copy actually landed and
+      # is being served, through the real public URL (Cloudflare Tunnel and
+      # all), not just "did scp exit 0".
+      - name: Verify the deployed game is reachable
+        run: |
+          for i in $(seq 1 10); do
+            if curl --fail -s -o /dev/null https://prismreference.com/games/hedgehogger/index.html; then
+              echo "Reachable after $((i * 3))s"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::https://prismreference.com/games/hedgehogger/index.html was not reachable after deploy"
+          exit 1

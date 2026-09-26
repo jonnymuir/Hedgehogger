@@ -419,8 +419,27 @@ parallel test suite.
   plain numbers" philosophy, so Level 4 needs no asset pipeline even though it drops the
   zero-dependency rule for its one library. The sprinkler in particular is a real, composed model
   (ground spike, riser, housing, three pinwheel spray arms that idle-drift/judder/spin depending on
-  state, animated jets on burst) rather than a post-and-glow placeholder — it needs to read as "a
-  sprinkler" at a glance even at rest, matching the same bar `sprites.js`'s 2D version was held to.
+  state) rather than a post-and-glow placeholder — it needs to read as "a sprinkler" at a glance
+  even at rest, matching the same bar `sprites.js`'s 2D version was held to. On burst, each arm
+  fires a real arcing water stream (a `QuadraticBezierCurve3` + `TubeGeometry`, not a straight cone
+  stub — a straight jet reads as "a light beam," an arc reads as "water," the same visual shorthand
+  a real garden sprinkler's rainbow-shaped spray uses) with droplets continuously traveling along
+  the curve each frame, all additive-blended/unlit (`MeshBasicMaterial`) rather than lit
+  (`MeshStandardMaterial`) so it stays bright and legible against the level's night scene instead of
+  depending on scene lighting to pick out a thin, dim shape — the same treatment already used for
+  the hazard-radius glow. `sprites.js`'s 2D burst got the equivalent treatment (a quadratic-curve
+  arc via `quadraticCurveTo`, traveling droplets, a splash ring, plus a soft mist puff and an
+  occasional idle drip) so both renderings read as "spraying water," not just "glowing."
+
+A follow-up pass fixed `makeCatMesh()`'s actual *shape and color*, not just its scale: it was built
+with a near-black body (`0x1d1d1d`/`0x0b0b0b` at its two call sites, versus `sprites.js`'s warm
+orange tabby gradient) stretched noticeably front-to-back, with a thin, proportionally-longer-
+than-the-body tail — the combination read as a rat, not a cat. Both call sites now use the same
+warm orange `sprites.js` uses (the chaser recolor was invented, not something the 2D version
+actually does — `renderChaser()` calls the exact same `drawCat()` as road cats, no separate
+"midnight" tint, so the 3D one shouldn't have one either), the body is rounder/chubbier, the ears
+are wider-based, the nose is a small sphere instead of a pointed cone, and the tail is thicker,
+shorter, and has a small fluffy tip sphere.
 
 Two more real bugs caught while building this detail pass, worth recording alongside the others:
 - **`makeCatMesh()` was never parameterized by `laneSize` at all** — every dimension was authored

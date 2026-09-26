@@ -491,33 +491,74 @@ export function drawSprinkler(ctx, x, y, radius, state, phaseT) {
     ctx.arc(tipX, tipY, 1.6, 0, Math.PI * 2);
     ctx.fill();
 
-    // Mid-burst: a short animated water jet firing from each arm tip, on
-    // top of (not instead of) the big radius glow above, which is what
-    // actually carries the fairness-relevant "how far is this dangerous"
-    // signal — this is purely the sprinkler prop selling "water," not a
-    // second hazard-radius indicator.
+    // Mid-burst: a real arcing water stream from each arm tip — a rainbow-
+    // shaped jet rather than a short straight stub, which reads far more
+    // unmistakably as "spraying water." Drawn on top of (not instead of)
+    // the big radius glow above, which is what actually carries the
+    // fairness-relevant "how far is this dangerous" signal — this is
+    // purely the sprinkler prop selling "water."
     if (state === 'burst') {
-      const jetLen = 7 + Math.sin(phaseT * 30 + i) * 2;
-      ctx.strokeStyle = 'rgba(173, 232, 244, 0.85)';
-      ctx.lineWidth = 1.6;
+      const outDist = 15 + Math.sin(phaseT * 6 + i) * 2;
+      const start = { x: tipX, y: tipY };
+      const end = { x: tipX + Math.cos(a) * outDist, y: 8 };
+      const control = { x: tipX + Math.cos(a) * outDist * 0.55, y: Math.min(tipY, end.y) - 11 };
+
+      const streamGrad = ctx.createLinearGradient(start.x, start.y, end.x, end.y);
+      streamGrad.addColorStop(0, 'rgba(224, 247, 250, 0.9)');
+      streamGrad.addColorStop(0.5, 'rgba(173, 232, 244, 0.65)');
+      streamGrad.addColorStop(1, 'rgba(144, 224, 239, 0.35)');
+      ctx.strokeStyle = streamGrad;
+      ctx.lineWidth = 2.4;
       ctx.beginPath();
-      ctx.moveTo(tipX, tipY);
-      ctx.lineTo(tipX + Math.cos(a) * jetLen, tipY + Math.sin(a) * jetLen * 0.45 - jetLen * 0.25);
+      ctx.moveTo(start.x, start.y);
+      ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
       ctx.stroke();
-      ctx.fillStyle = 'rgba(202, 240, 248, 0.9)';
-      for (const dOff of [0.5, 0.85]) {
+
+      // Droplets continuously traveling tip -> landing point along the arc.
+      ctx.fillStyle = 'rgba(224, 247, 250, 0.95)';
+      for (let d = 0; d < 4; d++) {
+        const t = (phaseT * 2.2 + d / 4 + i * 0.13) % 1;
+        const u = 1 - t;
+        const px = u * u * start.x + 2 * u * t * control.x + t * t * end.x;
+        const py = u * u * start.y + 2 * u * t * control.y + t * t * end.y;
         ctx.beginPath();
-        ctx.arc(
-          tipX + Math.cos(a) * jetLen * dOff,
-          tipY + Math.sin(a) * jetLen * 0.45 * dOff - jetLen * 0.25 * dOff,
-          0.9,
-          0,
-          Math.PI * 2,
-        );
+        ctx.arc(px, py, 1.3 * (1 - t * 0.5), 0, Math.PI * 2);
         ctx.fill();
       }
+
+      // A little splash ring pulsing where the stream lands.
+      const splashR = 1.5 + ((phaseT * 3 + i * 0.3) % 1) * 2.5;
+      ctx.strokeStyle = `rgba(202, 240, 248, ${0.5 * (1 - (splashR - 1.5) / 2.5)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(end.x, end.y, splashR, splashR * 0.35, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
       ctx.strokeStyle = '#b7c2c8';
       ctx.lineWidth = 2.4;
+    }
+  }
+
+  // A soft mist cloud around the head while bursting — sells "this is
+  // actively spraying" even in the instant between individual droplets.
+  if (state === 'burst') {
+    const mistGrad = ctx.createRadialGradient(0, -7, 1, 0, -7, 13);
+    mistGrad.addColorStop(0, 'rgba(224, 247, 250, 0.28)');
+    mistGrad.addColorStop(1, 'rgba(224, 247, 250, 0)');
+    ctx.fillStyle = mistGrad;
+    ctx.beginPath();
+    ctx.arc(0, -7, 13, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (state === 'idle') {
+    // A slow, occasional drip from the head even at rest — a quiet reminder
+    // this thing is plumbed to water, not just sitting there.
+    const dripCycle = phaseT % 1.5;
+    if (dripCycle < 1.1) {
+      const dripY = -2 + dripCycle * 9;
+      ctx.fillStyle = `rgba(142, 202, 230, ${0.7 * (1 - dripCycle / 1.1)})`;
+      ctx.beginPath();
+      ctx.ellipse(0, dripY, 0.7, 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 

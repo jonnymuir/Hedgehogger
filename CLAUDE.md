@@ -29,6 +29,11 @@ npm test                # the full fairness-guarantee test suite (tests/)
 
 - **Every level is deterministic** — no `Math.random()` anywhere in gameplay-relevant data or
   timing. See `docs/design.md` rule 1.
+- **Level 4 is a deliberate, scoped exception to "zero dependencies"** — its 3D chase-cam renderer
+  (`js/renderer3d.js`) is the only file in the repo that imports Three.js (a pinned-version CDN ES
+  module, fetched only from that file's own `init()`, never at module load time). This is
+  intentional, not drift — don't "fix" it away, and don't add a second dependency without the same
+  scrutiny. See `docs/design.md`'s "Mechanic spec: the third-dimension shift (Level 4)".
 - **One new mechanic per level, or a recombination of existing ones — never both, never more than
   one new thing.** See `docs/design.md` rule 2 and the "Mechanic ledger."
 - **Never trust a bot's fairness verdict without understanding why it passed or failed.** This

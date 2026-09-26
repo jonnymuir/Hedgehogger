@@ -20,7 +20,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const LEVEL_IDS = ['level1', 'level2', 'level3'];
+const LEVEL_IDS = ['level1', 'level2', 'level3', 'level4'];
 
 test.describe('exhaustive lane safety proof (ROAD/RIVER)', () => {
   for (const levelId of LEVEL_IDS) {

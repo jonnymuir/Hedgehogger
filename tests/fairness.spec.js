@@ -11,7 +11,7 @@
 const { test, expect } = require('@playwright/test');
 const { installBot } = require('./helpers');
 
-const LEVEL_IDS = ['level1', 'level2', 'level3'];
+const LEVEL_IDS = ['level1', 'level2', 'level3', 'level4'];
 const TRIALS = 20;
 
 test.describe('informed-dodge fairness sweep', () => {

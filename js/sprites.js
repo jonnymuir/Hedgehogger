@@ -412,40 +412,126 @@ export function drawSprinkler(ctx, x, y, radius, state, phaseT) {
     ctx.fillText('!', x, y - radius * 0.75);
   }
 
-  // Base head (always drawn last, on top)
+  // The sprinkler prop itself — a recognizable rotary lawn sprinkler (spike
+  // base + riser + a pinwheel head with three spray arms), always drawn in
+  // full regardless of state so it reads as "a sprinkler" even at rest, not
+  // just an abstract dot that only makes sense once it's already dangerous.
   const shake = state === 'charge' ? Math.sin(phaseT * 60) * 1.4 : 0;
   ctx.save();
   ctx.translate(x + shake, y);
+
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.beginPath();
-  ctx.ellipse(0, 8, 8, 2.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 9, 9, 2.6, 0, 0, Math.PI * 2);
   ctx.fill();
-  // Base plate + riser stem
+
+  // Ground spike — driven into the lawn, mostly buried.
+  ctx.fillStyle = '#2f4a34';
+  ctx.beginPath();
+  ctx.moveTo(-3, 8);
+  ctx.lineTo(3, 8);
+  ctx.lineTo(1.2, 15);
+  ctx.lineTo(-1.2, 15);
+  ctx.closePath();
+  ctx.fill();
+
+  // Base collar
   ctx.fillStyle = '#3a5a40';
   ctx.beginPath();
-  ctx.ellipse(0, 6, 10, 3, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 7, 6.5, 2.4, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#8d99ae';
-  ctx.fillRect(-2.5, -2, 5, 9);
 
-  const headGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, 8);
-  headGrad.addColorStop(0, '#ffd699');
-  headGrad.addColorStop(1, '#c47f3a');
+  // Riser pipe — a slightly tapered galvanized-metal stem.
+  const riserGrad = ctx.createLinearGradient(-2.4, 0, 2.4, 0);
+  riserGrad.addColorStop(0, '#7d8a94');
+  riserGrad.addColorStop(0.5, '#c7d0d6');
+  riserGrad.addColorStop(1, '#7d8a94');
+  ctx.fillStyle = riserGrad;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, 8);
+  ctx.lineTo(-1.6, -6);
+  ctx.lineTo(1.6, -6);
+  ctx.lineTo(2.4, 8);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head housing — rounded, olive-green plastic body typical of a real
+  // impulse/rotary sprinkler.
+  const headGrad = ctx.createRadialGradient(-2, -8, 1, 0, -6, 8);
+  headGrad.addColorStop(0, '#7a9b5e');
+  headGrad.addColorStop(1, '#4f6b3a');
   ctx.fillStyle = headGrad;
   ctx.beginPath();
-  ctx.arc(0, -3, 7, 0, Math.PI * 2);
+  ctx.ellipse(0, -7, 6.5, 5.5, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#7a4a1e';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#2f4022';
+  ctx.lineWidth = 1.3;
   ctx.stroke();
 
-  // Spray nozzle cross
-  ctx.strokeStyle = '#4a2c10';
-  ctx.lineWidth = 1.8;
+  // Three pinwheel spray arms — the single most sprinkler-defining shape.
+  // They idle-rotate slowly, judder while charging, and spin fast mid-burst.
+  const spin = state === 'burst' ? phaseT * 9
+    : state === 'charge' ? phaseT * 1.4 + Math.sin(phaseT * 45) * 0.12
+      : phaseT * 0.35;
+  const armLen = 11;
+  ctx.strokeStyle = '#b7c2c8';
+  ctx.lineWidth = 2.4;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    const a = spin + (i / 3) * Math.PI * 2;
+    const tipX = Math.cos(a) * armLen;
+    const tipY = -7 + Math.sin(a) * armLen * 0.45 - armLen * 0.3;
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
+    ctx.fillStyle = '#8d99ae';
+    ctx.beginPath();
+    ctx.arc(tipX, tipY, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mid-burst: a short animated water jet firing from each arm tip, on
+    // top of (not instead of) the big radius glow above, which is what
+    // actually carries the fairness-relevant "how far is this dangerous"
+    // signal — this is purely the sprinkler prop selling "water," not a
+    // second hazard-radius indicator.
+    if (state === 'burst') {
+      const jetLen = 7 + Math.sin(phaseT * 30 + i) * 2;
+      ctx.strokeStyle = 'rgba(173, 232, 244, 0.85)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(tipX + Math.cos(a) * jetLen, tipY + Math.sin(a) * jetLen * 0.45 - jetLen * 0.25);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(202, 240, 248, 0.9)';
+      for (const dOff of [0.5, 0.85]) {
+        ctx.beginPath();
+        ctx.arc(
+          tipX + Math.cos(a) * jetLen * dOff,
+          tipY + Math.sin(a) * jetLen * 0.45 * dOff - jetLen * 0.25 * dOff,
+          0.9,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+      }
+      ctx.strokeStyle = '#b7c2c8';
+      ctx.lineWidth = 2.4;
+    }
+  }
+
+  // Housing cap + a small reflective highlight so it still reads as a solid
+  // object, not just a set of lines, when idle.
+  ctx.fillStyle = '#3f5a2e';
   ctx.beginPath();
-  ctx.moveTo(-6, -3); ctx.lineTo(6, -3);
-  ctx.moveTo(0, -9); ctx.lineTo(0, 3);
-  ctx.stroke();
+  ctx.arc(0, -7, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.beginPath();
+  ctx.arc(-1.8, -8.6, 1, 0, Math.PI * 2);
+  ctx.fill();
+
   ctx.restore();
 }
 

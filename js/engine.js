@@ -1,4 +1,5 @@
 import * as S from './sprites.js';
+import { Renderer3D } from './renderer3d.js';
 
 const HUD_HEIGHT = 72;
 const HOP_RATE = 7.2; // jumpProgress units/sec -> ~0.14s hop
@@ -10,6 +11,10 @@ const ROLL_COOLDOWN = 0.9;
 const ROLL_LANES = 2;
 const OBSTACLE_MARGIN = 100;
 const PROGRESS_KEY = 'hh_progress';
+// A level4-style "render3D" level's one-time flat-2D -> 3D-chase-cam cinematic,
+// played once at level start (see setLevel3D()/onPrimary() below). Frozen at
+// playAge=0 the whole time it runs — see update()'s ENTERING_3D branch.
+const TRANSITION_DURATION = 2.2; // seconds
 
 function wrapX(startX, dir, speed, t, width, margin) {
   const cycle = width + margin * 2;
@@ -20,6 +25,26 @@ function wrapX(startX, dir, speed, t, width, margin) {
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+}
+
+function lerp3(a, b, t) {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t };
+}
+
+// Quadratic Bezier through a raised/pulled-back control point, so the
+// transition camera visibly swoops rather than cutting a straight line
+// through the ground — purely cosmetic polish on top of the eased blend.
+function bezierPoint3(p0, p1, p2, t) {
+  const u = 1 - t;
+  return {
+    x: u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x,
+    y: u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y,
+    z: u * u * p0.z + 2 * u * t * p1.z + t * t * p2.z,
+  };
 }
 
 function loadProgress() {
@@ -99,6 +124,11 @@ export class HedgehoggerGame {
   constructor(canvas, levels, options = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
+    // Only ever populated for a `render3D` level (see ensureRenderer3D()) —
+    // sits directly beneath `canvas` and stays fully transparent/inert until
+    // then, so levels 1-3 never touch it.
+    this.canvas3d = document.getElementById('gameCanvas3d');
+    this.renderer3D = null;
     this.levels = levels;
     this.levelsById = new Map(levels.map((l) => [l.id, l]));
     this.onExit = options.onExit || null;
@@ -140,7 +170,16 @@ export class HedgehoggerGame {
   // the tile already IS the "play" action.
   startLevel(levelId) {
     this.setLevel(this.levelsById.get(levelId));
-    this.beginPlaying();
+    if (this.level.render3D) {
+      // A render3D level always shows its own flat-2D START banner first,
+      // even from the hub's usual tap-tile-to-instant-play shortcut, so
+      // there's a real 2D frame for the cinematic to transition out of.
+      // Kick off the (possibly slow) Three.js load now, while the player's
+      // reading the banner, so tapping "TAP TO PLAY" never stutters.
+      this.ensureRenderer3D();
+    } else {
+      this.beginPlaying();
+    }
   }
 
   deactivate() {
@@ -172,6 +211,7 @@ export class HedgehoggerGame {
 
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = dpr;
     this.canvas.width = Math.round(this.logicalWidth * dpr);
     this.canvas.height = Math.round(this.logicalHeight * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -179,8 +219,16 @@ export class HedgehoggerGame {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const scale = Math.min(vw / this.logicalWidth, vh / this.logicalHeight);
-    this.canvas.style.width = `${Math.floor(this.logicalWidth * scale)}px`;
-    this.canvas.style.height = `${Math.floor(this.logicalHeight * scale)}px`;
+    const cssWidth = `${Math.floor(this.logicalWidth * scale)}px`;
+    const cssHeight = `${Math.floor(this.logicalHeight * scale)}px`;
+    this.canvas.style.width = cssWidth;
+    this.canvas.style.height = cssHeight;
+
+    if (this.level?.render3D) {
+      this.canvas3d.style.width = cssWidth;
+      this.canvas3d.style.height = cssHeight;
+      this.renderer3D?.handleResize(this.logicalWidth, this.logicalHeight, dpr);
+    }
   }
 
   resetRun() {
@@ -241,6 +289,41 @@ export class HedgehoggerGame {
     this.levelStartTime = performance.now();
   }
 
+  // The one-time, non-interactive flat-2D -> 3D cinematic for a `render3D`
+  // level (see render3DFrame()). playAge is deliberately NOT advanced here —
+  // update()'s ENTERING_3D branch leaves it untouched — so every hazard the
+  // player sees during the cinematic is frozen at its playAge=0 phase: it's
+  // the identical frame they'll be standing in front of the instant PLAYING
+  // begins, so nothing can become newly unsafe mid-cutscene (design.md rule
+  // 3). beginPlaying() itself fires automatically once the timer completes.
+  beginTransition3D() {
+    this.state = 'ENTERING_3D';
+    this.transitionT = 0;
+  }
+
+  // Fire-and-forget, idempotent: safe to call more than once (e.g. once from
+  // startLevel()'s hub-tap prewarm, once again as a safety net from
+  // onPrimary() at actual tap-time). Never called from setLevel() directly,
+  // update(), or any state-transition code — deliberately, so that every
+  // existing/extended automated test (which drives the engine via setLevel()
+  // + beginPlaying()/update() directly, never through the hub or onPrimary())
+  // never triggers the Three.js CDN fetch this kicks off. See
+  // js/renderer3d.js and docs/design.md's Level 4 mechanic spec.
+  async ensureRenderer3D() {
+    if (this.renderer3D) return;
+    const renderer3D = new Renderer3D(this.canvas3d);
+    this.renderer3D = renderer3D;
+    try {
+      await renderer3D.init(this.level, this.logicalWidth, this.logicalHeight, this.dpr || 1);
+    } catch (err) {
+      console.warn('Level 4 3D renderer failed to load, falling back to 2D.', err);
+      // Keep it a plain, always-truthy `{ready:false}` marker (not `null`)
+      // so render3DFrame()'s `renderer3D?.ready` check can permanently and
+      // cheaply resolve to the 2D fallback path without ever retrying.
+      this.renderer3D = { ready: false, failed: true };
+    }
+  }
+
   // --- Input -----------------------------------------------------------
 
   initInput() {
@@ -255,9 +338,22 @@ export class HedgehoggerGame {
     // hub round-trip.
     const onPrimary = () => {
       if (this.state === 'LEVEL_COMPLETE') { this.onExit?.(); return; }
-      if (this.state === 'START' || this.state === 'GAMEOVER') {
+      if (this.state === 'GAMEOVER') {
+        // Retrying mid-session always skips straight back into 3D play —
+        // the flat-2D -> 3D cinematic is a one-time, level-start-only beat,
+        // not something replayed on every death.
         this.resetRun();
         this.beginPlaying();
+        return;
+      }
+      if (this.state === 'START') {
+        this.resetRun();
+        if (this.level.render3D) {
+          this.ensureRenderer3D(); // safety net if startLevel()'s prewarm hasn't fired
+          this.beginTransition3D();
+        } else {
+          this.beginPlaying();
+        }
       }
     };
 
@@ -265,7 +361,22 @@ export class HedgehoggerGame {
     // playable with a mouse (desktop/Storybook/QA), not just touchscreens.
     // Every handler ignores input while inactive, so a HedgehoggerGame
     // instance can sit dormant behind the hub on the same canvas.
+    //
+    // `activeAtPointerDown` guards against a same-tap bleed-through: the
+    // hub and the engine share one canvas and both attach their own
+    // 'pointerup' listener to it (hub's registered first, in main.js). A
+    // single tap on a hub tile fires ONE 'pointerup' event that reaches
+    // BOTH listeners — hub's runs first, calls its onSelect callback, which
+    // synchronously flips this.active to true via setLevel() — and then the
+    // SAME event continues on to this engine's own 'pointerup' listener,
+    // which would otherwise see itself as freshly active and immediately
+    // react to that same tap (e.g. instantly ending a render3D level's
+    // START banner). Recording activeAtPointerDown at pointerdown time,
+    // before any of that mid-event activation can happen, and gating
+    // pointerup on it instead of re-checking `this.active` fresh, closes
+    // that gap for every level, not just render3D ones.
     this.canvas.addEventListener('pointerdown', (e) => {
+      this.activeAtPointerDown = this.active;
       if (!this.active) return;
       e.preventDefault();
       this.canvas.setPointerCapture(e.pointerId);
@@ -277,7 +388,7 @@ export class HedgehoggerGame {
     });
 
     this.canvas.addEventListener('pointerup', (e) => {
-      if (!this.active) return;
+      if (!this.active || !this.activeAtPointerDown) return;
       e.preventDefault();
       if (this.state !== 'PLAYING') {
         onPrimary();
@@ -462,6 +573,11 @@ export class HedgehoggerGame {
       if (this.deathTimer <= 0) this.state = 'GAMEOVER';
       return;
     }
+    if (this.state === 'ENTERING_3D') {
+      this.transitionT = Math.min(1, this.transitionT + dt / TRANSITION_DURATION);
+      if (this.transitionT >= 1) this.beginPlaying();
+      return;
+    }
     if (this.state !== 'PLAYING') return;
 
     this.playAge += dt;
@@ -600,6 +716,19 @@ export class HedgehoggerGame {
   // --- Render --------------------------------------------------------
 
   render() {
+    if (this.level.render3D) { this.render3DFrame(); return; }
+    this.render2DWorld();
+    this.renderHUD();
+    this.renderStateBanner();
+  }
+
+  // The ordinary top-down 2D scene (lanes, chaser, particles, player) — every
+  // level renders this, and a render3D level renders it too, either as its
+  // whole scene (levels 1-3, and Level 4's own START banner and any
+  // not-yet-ready/failed-3D fallback) or crossfaded under the 3D scene during
+  // ENTERING_3D. Never draws the HUD or state banners — see renderHUD()/
+  // renderStateBanner(), called separately so both render paths share them.
+  render2DWorld() {
     const ctx = this.ctx;
     ctx.fillStyle = '#111b13';
     ctx.fillRect(0, 0, this.logicalWidth, this.logicalHeight);
@@ -612,9 +741,9 @@ export class HedgehoggerGame {
     this.renderPlayer();
     this.floatingTexts.forEach((f) => f.draw(ctx));
     ctx.restore();
+  }
 
-    this.renderHUD();
-
+  renderStateBanner() {
     const levelNum = this.levels.indexOf(this.level) + 1;
     if (this.state === 'START') {
       this.renderBanner('HEDGEHOGGER', `Level ${levelNum} · ${this.level.name}`, this.level.introText || 'Hop apples & beetles for points. Reach a burrow to win!', 'TAP TO PLAY');
@@ -625,6 +754,71 @@ export class HedgehoggerGame {
       const bestSecs = this.bestTimeMs ? (this.bestTimeMs / 1000).toFixed(1) : secs;
       this.renderBanner('LEVEL COMPLETE!', `Time: ${secs}s  ·  Best: ${bestSecs}s`, `Score: ${this.score}`, 'BACK TO MAP');
     }
+  }
+
+  // render() for a `render3D` level (Level 4). `canvas3d` sits directly
+  // beneath `canvas` (see game.css) — this method is the only place that
+  // knows about the two-canvas setup; renderLanes()/renderChaser()/
+  // renderPlayer()/renderHUD()/renderBanner() are never touched.
+  render3DFrame() {
+    const r3 = this.renderer3D;
+    // Covers: the flat START banner (identical to levels 1-3); the 3D
+    // renderer still prewarming when ENTERING_3D begins (holds on the plain
+    // 2D frame so the screen is never blank, while the state machine's own
+    // timer keeps running regardless); and a permanently-failed 3D load,
+    // which degrades the rest of this run to the ordinary 2D path.
+    const use3D = this.state !== 'START' && r3?.ready;
+
+    if (!use3D) {
+      this.canvas.style.opacity = '1';
+      this.canvas3d.style.opacity = '0';
+      this.render2DWorld();
+      this.renderHUD();
+      this.renderStateBanner();
+      return;
+    }
+
+    if (this.state === 'ENTERING_3D') {
+      const eased = easeInOutCubic(this.transitionT);
+      this.canvas.style.opacity = String(1 - eased);
+      this.canvas3d.style.opacity = String(eased);
+      // The 2D scene keeps rendering underneath throughout the crossfade —
+      // it's a continuous morph, not a cut to black then a cut to 3D.
+      this.render2DWorld();
+      this.updateTransitionCamera(eased);
+      r3.renderFrame();
+      this.renderHUD();
+      return;
+    }
+
+    // PLAYING / DEATH_ANIM / LEVEL_COMPLETE / GAMEOVER, renderer ready.
+    this.canvas.style.opacity = '1';
+    this.canvas3d.style.opacity = '1';
+    this.ctx.clearRect(0, 0, this.logicalWidth, this.logicalHeight);
+    r3.syncFromEngine(this);
+    r3.renderFrame();
+    this.renderHUD();
+    this.renderStateBanner();
+  }
+
+  // Blends the transition camera from Renderer3D's own top-down starting
+  // pose to its chase-cam pose — both poses, and all the camera-distance/
+  // fov constants, are owned entirely by renderer3d.js (see getTopDownPose()/
+  // getChasePose()) so there's exactly one definition of "what the chase
+  // camera looks like," shared between this cinematic blend and the ongoing
+  // gameplay camera in Renderer3D.syncFromEngine().
+  updateTransitionCamera(eased) {
+    const top = this.renderer3D.getTopDownPose(this);
+    const chase = this.renderer3D.getChasePose(this);
+    const control = {
+      x: chase.pos.x,
+      y: Math.max(top.pos.y, chase.pos.y) * 1.15,
+      z: (top.pos.z + chase.pos.z) / 2,
+    };
+    const pos = bezierPoint3(top.pos, control, chase.pos, eased);
+    const lookAt = lerp3(top.lookAt, chase.lookAt, eased);
+    const fov = top.fov + (chase.fov - top.fov) * eased;
+    this.renderer3D.setCameraPose(pos, lookAt, fov);
   }
 
   renderLanes() {

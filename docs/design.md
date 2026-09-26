@@ -7,7 +7,11 @@ reference app (`homePage.cshtml`). This repo owns the game entirely — source, 
 own deploy pipeline — and has no dependency on that repo's code; Umbraco.Prism just links to
 `/games/hedgehogger/index.html`, a path this repo's own deploy pipeline keeps populated on the
 same VPS. Built with zero dependencies and no build step (plain ES modules, loaded directly by the
-browser) — the only tooling in this repo is for tests and deployment, not the game itself.
+browser) — the only tooling in this repo is for tests and deployment, not the game itself. Level
+4 is a single, deliberate, scoped exception to "zero dependencies" — see "Mechanic spec: the
+third-dimension shift (Level 4)" below — but it's still no-build-step: `js/renderer3d.js` is the
+only file that touches its one dependency, loaded as a pinned-version ES module straight from a
+CDN, not bundled or added to `package.json`.
 
 ## Design pillars
 
@@ -53,15 +57,19 @@ naturally scores higher, so comparing raw scores across levels isn't meaningful.
 ## Repo layout
 
 ```
-index.html          — page shell: the canvas, the back-to-app link, the map link, loads js/main.js
+index.html          — page shell: TWO stacked canvases (see Level 4 below), the back-to-app link,
+                       the map link, loads js/main.js
 game.css              — layout/letterboxing/link styling only; all game visuals are Canvas
 js/
   main.js             — orchestrator: builds the level roster, owns hub<->engine mode switching
   engine.js            — state machine, physics, collision, camera, save data, rendering orchestration
   hub.js                — the level-select home screen (see "The progress hub" below)
-  sprites.js             — every visual: layered/shaded Canvas 2D vector art, zero image assets
+  sprites.js             — every 2D visual: layered/shaded Canvas 2D vector art, zero image assets
+  renderer3d.js           — Level 4 only: the 3D chase-cam scene (see "Mechanic spec: the
+                            third-dimension shift" below) — the repo's one Three.js dependency lives
+                            entirely in this file
   level-utils.js          — shared level-authoring helpers (e.g. `evenlySpaced` obstacle placement)
-  level1.js, level2.js, level3.js, ...  — one file per level, pure declarative data
+  level1.js, level2.js, level3.js, level4.js, ...  — one file per level, pure declarative data
 tests/                — Playwright test suite (see "Fairness testing" below)
 scripts/               — one-off authoring tools, e.g. find-safe-start-phase.js
 server.js               — zero-dependency static server, used for local dev and by the tests
@@ -171,6 +179,17 @@ codified as real committed tests rather than ad-hoc scripts:
 5. Separately, a "blind rush" test (always move the same direction, ignore all hazards) is
    expected to die sometimes — that's the game being a game. None of the tests above model that;
    don't confuse the two.
+6. **Level 4 reuses all of 1-4 above unmodified** — its `render3D` flag only changes how the level
+   is drawn, never the underlying grid/collision model those tests query, so `tests/lane-safety.
+   spec.js`/`tests/fairness.spec.js` simply include `'level4'` in their existing level lists, and
+   `tests/chaser.spec.js` loops over every level that has a `chaser` config. None of this suite
+   ever calls the engine's `render()` — every one of these tests drives `update()`/`performMove()`/
+   `setLevel()` directly — so Level 4's one dependency (Three.js, fetched from a CDN only inside
+   `js/renderer3d.js`'s `init()`) is never touched by `npm test`, and CI stays fully offline. What
+   this suite structurally *cannot* check is whether the 3D chase camera itself keeps enough of the
+   board on screen to satisfy rule 3 — it only ever queries engine state, never pixels or camera
+   framing — so that one property is a manual-playtest sign-off, not an automated guarantee; see
+   "Mechanic spec: the third-dimension shift" below.
 
 The bar for 1–4 is **zero deaths**. A death there means a real bug, not a skill check — and
 `npm test` runs all of them on every PR via `.github/workflows/ci.yml`.
@@ -233,12 +252,15 @@ Tracks what each level introduces, so pacing decisions are visible at a glance.
 | 1 — Garden Crossing | Road (mower/cat traffic), river (logs), telegraphed sprinkler hazard, goal burrows, apples/beetles | — (this is the tutorial level) |
 | 2 — Rain Garden | The scrolling camera / extended length itself — a level too long to see all at once, so the player has to plan ahead without seeing the whole board | Longer arrangement of the same road/river/sprinkler vocabulary from Level 1, no new hazard *type* |
 | 3 — Midnight Prowl | The prowling cat (see spec below) | Same terrain as Level 2, lane for lane — the only difference is the cat; roll gains a second meaning (see below) |
+| 4 — Twilight Chase | The 3D chase-cam rendering shift itself (see spec below) | Same road/river/sprinkler/chaser vocabulary as Level 3, recombined into a fresh, slightly longer arrangement — no new hazard type |
 
 Rule 2, applied here: scrolling and "the prowling cat" are each their own new thing, so they get
 their own levels rather than landing together — Level 2 is deliberately just "the existing
 vocabulary, but longer, and you can't see it all at once," with zero new hazard types. Level 3
 then goes further: it doesn't even introduce new *terrain*, only the cat, isolating the one new
-mechanic as cleanly as possible.
+mechanic as cleanly as possible. Level 4 follows the same discipline at a much bigger scale: the
+one new thing is the rendering paradigm itself (flat 2D becoming a full 3D chase-cam scene), so its
+lane vocabulary is deliberately unchanged from Level 3's, not a new hazard riding along with it.
 
 ### Mechanic spec: the prowling cat (Level 3)
 
@@ -297,6 +319,83 @@ inputs at the same times and you get the identical run); it's the whole point of
 just means fairness testing for this mechanic can't rely purely on a fast bot (see above) — it
 needs the engine's own state stepped directly, with the player deliberately left idle, to catch
 the class of bug an instant-reacting bot can never trigger.
+
+### Mechanic spec: the third-dimension shift (Level 4)
+
+Level 4 is Level 3's exact hazard vocabulary (road/river/sprinkler/chaser) recombined into a fresh,
+slightly longer arrangement, rendered through a completely different pipeline: a full 3D scene
+with a third-person chase camera, via Three.js (see the top of this doc and `js/renderer3d.js`).
+The load-bearing design decision, matching this game's other "new mechanic" specs: **the
+deterministic 2D grid simulation is entirely unchanged.** `update()`, `obstacleX()`,
+`sprinklerState()`, the chaser block, collision, scoring, and save data don't know or care whether
+a level is drawn in 2D or 3D — only `render()` does. This is what let the existing fairness proofs
+extend to Level 4 with a two-line diff (see "Fairness testing," point 6 above) instead of a
+parallel test suite.
+
+- **`level.render3D: true`** is the only thing that marks a level as 3D — `render()`
+  (`js/engine.js`) dispatches on this flag, not a level id, keeping the engine's "no per-level `if`
+  branches" rule intact.
+- **The flat-2D START banner is identical to every other level** — a `render3D` level's `START`
+  state renders through the exact same 2D path as Levels 1-3. The 3D scene doesn't even have to be
+  loaded yet for this to work.
+- **A one-time, non-interactive cinematic (`ENTERING_3D` state)** plays once the player taps to
+  begin, crossfading the flat 2D canvas into the 3D canvas underneath it (two stacked `<canvas>`
+  elements, see `index.html`/`game.css`) while the camera swoops from a top-down starting pose to
+  the chase-cam pose along a quadratic Bezier, over a fixed `TRANSITION_DURATION` (2.2s). Both
+  camera poses, and every distance/FOV constant behind them, live in `js/renderer3d.js`
+  (`getTopDownPose()`/`getChasePose()`) — not duplicated in `engine.js` — so the cinematic's ending
+  pose and the ongoing gameplay camera share exactly one definition.
+- **`playAge` is deliberately frozen at 0 for the whole cinematic** (see `update()`'s `ENTERING_3D`
+  branch) — the same fairness reasoning as the chaser's idle-time model above, applied here at the
+  level-start moment itself: every hazard the player sees during the cutscene is at its exact
+  `playAge=0` phase, the identical frame they're standing in front of the instant `PLAYING`
+  actually begins, so nothing can become newly unsafe mid-cutscene. `performMove()`'s existing
+  `state !== 'PLAYING'` gate blocks input for free throughout.
+- **Dying and retrying mid-level skips the cinematic** — `GAMEOVER` always goes straight back to
+  `beginPlaying()`. The cinematic is a one-time, level-start-only beat, not something replayed on
+  every death.
+- **The Three.js CDN fetch is deliberately isolated and deferred**, both for the "zero
+  dependencies" exception's own sake and for CI: `js/renderer3d.js` is the only file that ever
+  imports it, and only inside its `init()` method — never at module load time. `engine.js` only
+  ever calls `ensureRenderer3D()` (which calls `init()`) from `startLevel()` (prewarms while the
+  player's reading the START banner) and, as a safety net, from the real `onPrimary()` tap handler
+  — **never** from `setLevel()` or `update()`. That's what keeps every existing/extended automated
+  test offline: they all drive the engine via direct `setLevel()`/`update()`/`performMove()` calls,
+  never through the hub tap or `onPrimary()`, so `npm test` never fetches the CDN module. If the
+  fetch fails (or hasn't finished by tap time), `render()` holds on the plain 2D frame — the
+  `ENTERING_3D` timer keeps running renderer-agnostically regardless, so the game can't soft-lock;
+  a permanent failure just degrades the rest of that run to the ordinary 2D path, level 1-3 style.
+- **The chase camera is tuned for fairness first, cinematics second.** A close third-person
+  perspective fundamentally shows less of the board at once than the old full-lane-width top-down
+  view — far lanes converge toward a vanishing point, and a tight/narrow lens can hide hazards near
+  the frustum's edges. `getChasePose()`'s constants (a wide 58° FOV, camera height/distance/
+  lookahead all expressed in `laneSize` units) deliberately favor visibility over a tighter,
+  more dramatic lens, and Level 4's own lane layout (`js/level4.js`) adds a mandatory `SAFE` buffer
+  row between every hazard lane to give this narrower-feeling view extra margin. **This is the one
+  fairness property in this game that the automated suite cannot verify** — `lane-safety.spec.js`
+  and `fairness.spec.js` only ever query `obstacleX()`/`sprinklerState()`, never pixels or camera
+  framing — so it needs an explicit manual playtest sign-off (does every hazard telegraph stay
+  visible ~2 lanes ahead, in a real browser, before shipping a tuning change here), the same honest
+  admission this doc already makes about bots elsewhere.
+- **Meshes are procedural primitives, no textures/GLTF** (`js/renderer3d.js`'s `makeCatMesh()`/
+  `makeMowerMesh()`/`makeLogMesh()`/`makePlayerGroup()`/etc.) — the 3D analogue of `sprites.js`'s
+  "every visual is drawn fresh from plain numbers" philosophy, so Level 4 needs no asset pipeline
+  even though it drops the zero-dependency rule for its one library.
+
+One real bug caught while building this, worth recording the same way "The progress hub" section
+above records its own: the hub and the engine share one `<canvas>` and each attaches its own
+`pointerup` listener to it (hub's registered first). A single tap on a hub tile fires ONE
+`pointerup` event that reaches BOTH listeners — hub's runs first and, via its `onSelect` callback,
+synchronously flips the engine's `active` to `true` mid-event (inside `setLevel()`) — and then the
+*same* event continues on to the engine's own `pointerup` listener, which would otherwise see
+itself as freshly active and react to that same tap immediately. For Levels 1-3 this was invisible
+by coincidence (`startLevel()` already called `beginPlaying()` synchronously, so the bled-through
+event just fell through to harmless swipe-threshold math). Level 4 surfaced it for real: tapping
+its hub tile was instantly ending the `START` banner and beginning the cinematic, skipping the
+"read the banner, then tap again" flow entirely. Fixed by recording `activeAtPointerDown` at
+`pointerdown` time (before any mid-event activation can happen) and gating `pointerup` on that
+recorded value instead of re-checking `active` fresh — closing the gap for every level, not just
+Level 4's.
 
 ## Deployment
 

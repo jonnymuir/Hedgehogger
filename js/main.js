@@ -3,6 +3,7 @@ import { LevelHub } from './hub.js';
 import { LEVEL_1 } from './level1.js';
 import { LEVEL_2 } from './level2.js';
 import { LEVEL_3 } from './level3.js';
+import { LEVEL_4 } from './level4.js';
 
 // Ordered level roster. The hub is the game's home screen — it shows every
 // level's lock state and best score/time (read straight from localStorage)
@@ -10,7 +11,7 @@ import { LEVEL_3 } from './level3.js';
 // engine. Completing OR dying out of a level returns to the hub rather than
 // auto-advancing, so the player always chooses what's next: replay an
 // already-beaten level to improve their score, or move on.
-const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3];
+const LEVELS = [LEVEL_1, LEVEL_2, LEVEL_3, LEVEL_4];
 
 window.addEventListener('load', () => {
   const canvas = document.getElementById('gameCanvas');

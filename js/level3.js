@@ -17,6 +17,7 @@ const W = 392; // logical width = cols(7) * laneSize(56)
 export const LEVEL_3 = {
   id: 'level3',
   name: 'Midnight Prowl',
+  nextLevelId: 'level4',
   cols: 7,
   rows: 19,
   viewportRows: 11,

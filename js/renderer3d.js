@@ -68,60 +68,79 @@ function makeCatMesh(T, color, laneSize, relativeSize = 1) {
   const mat = new T.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.05 });
   const stripeMat = new T.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.7 });
 
+  // A rounder, chubbier body than a first pass here had — (1.1, 0.75, 1.5)
+  // stretched it front-to-back enough, combined with the near-black color
+  // the two call sites used, that it read as a rat rather than sprites.js's
+  // round, warm-orange 2D cat. Rounder proportions + that same orange (see
+  // the two call sites below) is the actual fix.
   const body = new T.Mesh(new T.SphereGeometry(1, 16, 12), mat);
-  body.scale.set(1.1 * scale, 0.75 * scale, 1.5 * scale);
-  body.position.y = 0.8 * scale;
+  body.scale.set(1.15 * scale, 0.85 * scale, 1.2 * scale);
+  body.position.y = 0.85 * scale;
   body.castShadow = true;
   group.add(body);
 
   // Tabby stripe patches — flattened dark ellipsoids hugging the back, the
   // same "a few tone-on-tone arcs" shorthand sprites.js uses in 2D.
-  for (const t of [-0.5, 0, 0.55]) {
-    const stripe = new T.Mesh(new T.SphereGeometry(0.32 * scale, 8, 6), stripeMat);
-    stripe.scale.set(0.5, 0.18, 0.9);
-    stripe.position.set(0, 1.15 * scale, t * scale);
+  for (const t of [-0.4, 0, 0.45]) {
+    const stripe = new T.Mesh(new T.SphereGeometry(0.34 * scale, 8, 6), stripeMat);
+    stripe.scale.set(0.55, 0.2, 0.85);
+    stripe.position.set(0, 1.2 * scale, t * scale);
     stripe.renderOrder = 1;
     group.add(stripe);
   }
 
-  const head = new T.Mesh(new T.SphereGeometry(0.6, 16, 12), mat);
-  head.scale.set(scale, 0.9 * scale, 0.9 * scale);
-  head.position.set(0, 1.15 * scale, 1.15 * scale);
+  const head = new T.Mesh(new T.SphereGeometry(0.62, 16, 12), mat);
+  head.scale.set(scale, 0.92 * scale, 0.88 * scale);
+  head.position.set(0, 1.2 * scale, 0.95 * scale);
   head.castShadow = true;
   group.add(head);
 
-  const earGeo = new T.ConeGeometry(0.22 * scale, 0.4 * scale, 8);
+  // Wider-based, less needle-thin ears — a first pass here used thin
+  // pointed cones that read closer to rat ears than a cat's broader
+  // triangles.
+  const earGeo = new T.ConeGeometry(0.3 * scale, 0.36 * scale, 8);
   for (const side of [-1, 1]) {
     const ear = new T.Mesh(earGeo, mat);
-    ear.position.set(side * 0.3 * scale, 1.55 * scale, 1.15 * scale);
+    ear.position.set(side * 0.32 * scale, 1.6 * scale, 0.95 * scale);
     ear.rotation.x = -0.3;
     group.add(ear);
 
-    const innerEar = new T.Mesh(new T.ConeGeometry(0.12 * scale, 0.24 * scale, 8), stripeMat);
-    innerEar.position.set(side * 0.3 * scale, 1.5 * scale, 1.22 * scale);
+    const innerEar = new T.Mesh(new T.ConeGeometry(0.16 * scale, 0.2 * scale, 8), stripeMat);
+    innerEar.position.set(side * 0.32 * scale, 1.55 * scale, 1.0 * scale);
     innerEar.rotation.x = -0.3;
     group.add(innerEar);
   }
 
   // Face: two glowing eyes (brighter/narrower when stalking, set per-frame
-  // in syncFromEngine) and a small pink nose.
+  // in syncFromEngine) and a small round nose (a rounder sphere reads as a
+  // cuter cat snout; the original thin cone here read closer to a rodent's
+  // pointed nose).
   const eyeMat = new T.MeshStandardMaterial({ color: 0xffd23f, emissive: 0xffd23f, emissiveIntensity: 0.5, roughness: 0.3 });
   const eyes = [];
   for (const side of [-1, 1]) {
-    const eye = new T.Mesh(new T.SphereGeometry(0.07 * scale, 8, 8), eyeMat.clone());
-    eye.position.set(side * 0.22 * scale, 1.22 * scale, 1.65 * scale);
+    const eye = new T.Mesh(new T.SphereGeometry(0.075 * scale, 8, 8), eyeMat.clone());
+    eye.position.set(side * 0.24 * scale, 1.28 * scale, 1.4 * scale);
     group.add(eye);
     eyes.push(eye);
   }
-  const nose = new T.Mesh(new T.ConeGeometry(0.06 * scale, 0.1 * scale, 6), new T.MeshStandardMaterial({ color: 0xffb4a2, roughness: 0.5 }));
-  nose.rotation.x = Math.PI / 2;
-  nose.position.set(0, 1.12 * scale, 1.72 * scale);
+  const nose = new T.Mesh(
+    new T.SphereGeometry(0.08 * scale, 8, 6),
+    new T.MeshStandardMaterial({ color: 0xffb4a2, roughness: 0.5 }),
+  );
+  nose.scale.set(1, 0.8, 0.9);
+  nose.position.set(0, 1.2 * scale, 1.45 * scale);
   group.add(nose);
 
-  const tail = new T.Mesh(new T.CylinderGeometry(0.08 * scale, 0.14 * scale, 1.4 * scale, 8), mat);
-  tail.rotation.z = Math.PI / 2.4;
-  tail.position.set(0, 0.9 * scale, -1.3 * scale);
+  // A thicker, shorter, fluffy-tipped tail — the original was thin and
+  // proportionally longer than the body itself, the single biggest "rat"
+  // tell (real/cartoon cat tails are noticeably thicker, often bushy).
+  const tail = new T.Mesh(new T.CylinderGeometry(0.16 * scale, 0.24 * scale, 1.05 * scale, 8), mat);
+  tail.rotation.z = Math.PI / 2.6;
+  tail.position.set(0, 1.0 * scale, -1.15 * scale);
   group.add(tail);
+  const tailTip = new T.Mesh(new T.SphereGeometry(0.22 * scale, 8, 6), mat);
+  tailTip.position.set(0, 1.55 * scale, -1.65 * scale);
+  group.add(tailTip);
 
   group.userData.eyes = eyes;
   return group;
@@ -459,6 +478,7 @@ function makeSprinklerMesh(T, laneSize) {
 
   const armLen = laneSize * 0.22;
   const jets = [];
+  const DROPLETS_PER_ARM = 4;
   for (let i = 0; i < 3; i++) {
     const angle = (i / 3) * Math.PI * 2;
     const tip = new T.Vector3(Math.cos(angle) * armLen, armLen * 0.4, Math.sin(angle) * armLen);
@@ -472,18 +492,55 @@ function makeSprinklerMesh(T, laneSize) {
     nozzle.position.copy(tip);
     armsGroup.add(nozzle);
 
-    const jetMat = new T.MeshStandardMaterial({
-      color: 0xade8f4, emissive: 0xade8f4, emissiveIntensity: 0.6, transparent: true, opacity: 0, roughness: 0.2,
-    });
-    const jetLen = laneSize * 0.18;
-    const jetTip = tip.clone().add(tip.clone().normalize().multiplyScalar(jetLen));
-    jetTip.y = tip.y + jetLen * 0.3;
-    const jet = new T.Mesh(new T.ConeGeometry(laneSize * 0.025, jetLen, 8, 1, true), jetMat);
-    orientBetween(T, jet, tip, jetTip);
-    armsGroup.add(jet);
+    // A real arcing water stream — a curved tube rising from the nozzle
+    // and falling to a landing point — rather than a straight cone stub.
+    // A straight jet reads as "a light beam"; an arc reads as "water,"
+    // the same way a single rainbow-shaped stream is the universal
+    // shorthand for a garden sprinkler.
+    const outDir = tip.clone().setY(0).normalize();
+    const outDist = laneSize * 0.42;
+    const landing = tip.clone().addScaledVector(outDir, outDist).setY(0);
+    const apex = tip.clone().addScaledVector(outDir, outDist * 0.55);
+    apex.y = Math.max(tip.y, laneSize * 0.05) + laneSize * 0.22;
+    const curve = new T.QuadraticBezierCurve3(tip, apex, landing);
 
-    jets.push(jet);
+    // Additive-blended and unlit (MeshBasicMaterial, not Standard) so the
+    // stream reads as a bright, glowing arc against a dark night scene at
+    // real gameplay camera distance, the same treatment that made the
+    // glow/mist sphere actually visible rather than relying on ordinary
+    // scene lighting to pick out a thin, dim tube.
+    const streamMat = new T.MeshBasicMaterial({
+      color: 0xd4f4ff, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false,
+    });
+    const stream = new T.Mesh(new T.TubeGeometry(curve, 16, laneSize * 0.026, 8, false), streamMat);
+    armsGroup.add(stream);
+
+    // Droplets that travel along the same curve each frame (see
+    // updateSprinklerVisual()) — a continuously "flowing" arc instead of
+    // a static shape, which is what actually sells motion/liquid.
+    const droplets = [];
+    for (let d = 0; d < DROPLETS_PER_ARM; d++) {
+      const dropMat = new T.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false,
+      });
+      const drop = new T.Mesh(new T.SphereGeometry(laneSize * 0.035, 8, 8), dropMat);
+      armsGroup.add(drop);
+      droplets.push(drop);
+    }
+
+    jets.push({ stream, droplets, curve });
   }
+
+  // A soft mist puff around the head while bursting — sells "actively
+  // spraying" in the instants between individual droplets.
+  const mist = new T.Mesh(
+    new T.SphereGeometry(laneSize * 0.24, 12, 8),
+    new T.MeshBasicMaterial({
+      color: 0xe0f7fa, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false,
+    }),
+  );
+  mist.position.y = headY;
+  group.add(mist);
 
   // A soft glow sphere over the whole area, giving a rough sense of "how
   // far this is dangerous" — additive-blended and fairly small/translucent
@@ -505,7 +562,7 @@ function makeSprinklerMesh(T, laneSize) {
   light.position.y = headY;
   group.add(light);
 
-  return { group, armsGroup, glowMesh: glow, jets, light };
+  return { group, armsGroup, glowMesh: glow, jets, mist, light };
 }
 
 export class Renderer3D {
@@ -616,7 +673,7 @@ export class Renderer3D {
 
       if (lane.type === 'ROAD') {
         for (const obs of lane.obstacles) {
-          const mesh = obs.kind === 'MOWER' ? makeMowerMesh(T, obs, laneSize) : makeCatMesh(T, 0x1d1d1d, laneSize, 0.85);
+          const mesh = obs.kind === 'MOWER' ? makeMowerMesh(T, obs, laneSize) : makeCatMesh(T, 0xd46200, laneSize, 0.85);
           mesh.position.z = z;
           // Cats have a real face/tail (see makeCatMesh); face them the way
           // they're actually moving instead of a fixed default orientation.
@@ -633,10 +690,10 @@ export class Renderer3D {
         }
       } else if (lane.type === 'SPRINKLER') {
         for (const spr of lane.sprinklers) {
-          const { group: sprinklerGroup, armsGroup, glowMesh, jets, light } = makeSprinklerMesh(T, laneSize);
+          const { group: sprinklerGroup, armsGroup, glowMesh, jets, mist, light } = makeSprinklerMesh(T, laneSize);
           sprinklerGroup.position.set((spr.col + 0.5) * laneSize, 0, z);
           this.worldGroup.add(sprinklerGroup);
-          this.sprinklerEntries.push({ armsGroup, glowMesh, jets, light, spr });
+          this.sprinklerEntries.push({ armsGroup, glowMesh, jets, mist, light, spr });
         }
       } else if (lane.type === 'GOAL') {
         // A flush, near-black disc at ground level reads as almost nothing
@@ -676,7 +733,10 @@ export class Renderer3D {
     this.worldGroup.add(this.rollBall);
 
     if (level.chaser) {
-      this.chaserGroup = makeCatMesh(T, 0x0b0b0b, laneSize, 1.15);
+      // Same orange as the road-obstacle cats — sprites.js's 2D chaser is
+      // drawn with the exact same drawCat() as its road cats, no separate
+      // "midnight" recolor, so the 3D one shouldn't invent one either.
+      this.chaserGroup = makeCatMesh(T, 0xd46200, laneSize, 1.15);
       this.worldGroup.add(this.chaserGroup);
     }
   }
@@ -727,7 +787,7 @@ export class Renderer3D {
   }
 
   updateSprinklerVisual(entry, state, phaseT) {
-    const { armsGroup, glowMesh, jets, light, spr } = entry;
+    const { armsGroup, glowMesh, jets, mist, light, spr } = entry;
     const laneSize = this.laneSize;
     // Mild proportional variation between differently-sized sprinklers,
     // relative to a typical configured radius — not a literal world-unit
@@ -749,7 +809,11 @@ export class Renderer3D {
       armsGroup.rotation.z = 0;
     }
 
-    for (const jet of jets) jet.material.opacity = 0;
+    for (const jet of jets) {
+      jet.stream.material.opacity = 0;
+      for (const drop of jet.droplets) drop.material.opacity = 0;
+    }
+    mist.material.opacity = 0;
 
     if (state === 'idle') {
       glowMesh.material.color.set(0x8ecae6);
@@ -769,12 +833,19 @@ export class Renderer3D {
       glowMesh.scale.setScalar(laneSize * (0.26 + Math.sin(phaseT * 10) * 0.03) * rFactor);
       light.color.set(0x8ecae6);
       light.intensity = 4;
-      // Each arm's own water jet, pulsing independently for a lively spray
-      // rather than a uniform static cone — purely the prop selling
-      // "water"; the glow sphere above still carries the actual hazard
-      // radius.
+
+      // Each arm's own arcing water stream, plus droplets continuously
+      // traveling along it — a real flowing arc, not a uniform static
+      // shape, which is what actually sells "water" over "a light beam."
+      // The glow sphere above still carries the actual hazard radius.
+      mist.material.opacity = 0.5 + 0.15 * Math.sin(phaseT * 14);
       jets.forEach((jet, i) => {
-        jet.material.opacity = 0.55 + 0.35 * Math.sin(phaseT * 30 + i * 2);
+        jet.stream.material.opacity = 0.5 + 0.25 * Math.sin(phaseT * 20 + i * 2);
+        jet.droplets.forEach((drop, d) => {
+          const t = (phaseT * 2.2 + d / jet.droplets.length + i * 0.13) % 1;
+          jet.curve.getPoint(t, drop.position);
+          drop.material.opacity = 0.85 * (1 - t * 0.5);
+        });
       });
     }
   }

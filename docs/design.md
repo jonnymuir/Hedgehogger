@@ -414,9 +414,33 @@ parallel test suite.
   visible ~2 lanes ahead, in a real browser, before shipping a tuning change here), the same honest
   admission this doc already makes about bots elsewhere.
 - **Meshes are procedural primitives, no textures/GLTF** (`js/renderer3d.js`'s `makeCatMesh()`/
-  `makeMowerMesh()`/`makeLogMesh()`/`makePlayerGroup()`/etc.) — the 3D analogue of `sprites.js`'s
-  "every visual is drawn fresh from plain numbers" philosophy, so Level 4 needs no asset pipeline
-  even though it drops the zero-dependency rule for its one library.
+  `makeMowerMesh()`/`makeLogMesh()`/`makePlayerGroup()`/`makeAppleMesh()`/`makeBeetleMesh()`/
+  `makeSprinklerMesh()`/etc.) — the 3D analogue of `sprites.js`'s "every visual is drawn fresh from
+  plain numbers" philosophy, so Level 4 needs no asset pipeline even though it drops the
+  zero-dependency rule for its one library. The sprinkler in particular is a real, composed model
+  (ground spike, riser, housing, three pinwheel spray arms that idle-drift/judder/spin depending on
+  state, animated jets on burst) rather than a post-and-glow placeholder — it needs to read as "a
+  sprinkler" at a glance even at rest, matching the same bar `sprites.js`'s 2D version was held to.
+
+Two more real bugs caught while building this detail pass, worth recording alongside the others:
+- **`makeCatMesh()` was never parameterized by `laneSize` at all** — every dimension was authored
+  against a bare unit (~1) sphere, so both the road-obstacle cats and the chaser rendered at
+  roughly 1/30th their intended size (a couple of world units against a 56-unit lane). It read as
+  plausible in an up-close test shot (a small object very close to the camera still fills a
+  reasonable fraction of frame) but would have been nearly invisible at the real gameplay chase-cam
+  distance — exactly the kind of bug a close test shot can hide and only the real in-game camera
+  distance reveals. Fixed by folding `laneSize` into the `scale` argument at both call sites, so
+  every already-proportional line in the function needed no changes.
+- **`renderBanner()`'s `footer` text was never word-wrapped**, only `subtitle` was — a single
+  `ctx.fillText()` call that silently overflowed past the card (and the canvas itself) for any
+  footer longer than the card width. This is a pre-existing bug in code Level 4 never touched, not
+  something it introduced — it was simply never visible before, because `footer` carries a level's
+  own `introText` on the `START` banner, and Level 4 is the *first* level whose `START` banner is
+  ever actually shown during real play (every other level's hub-tap skips straight to `PLAYING`);
+  GAMEOVER/LEVEL_COMPLETE's own footers (`Best score: N` / `Score: N`) are always short enough to
+  never trigger it. Fixed by measuring both `subtitle` and `footer`'s wrap *before* laying out the
+  card, so the card grows to fit variable-length content instead of a fixed height that clips or
+  overflows longer text — see `wrapLines()`/`drawLines()`.
 
 One real bug caught while building this, worth recording the same way "The progress hub" section
 above records its own: the hub and the engine share one `<canvas>` and each attaches its own

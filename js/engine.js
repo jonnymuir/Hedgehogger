@@ -970,7 +970,29 @@ export class HedgehoggerGame {
     ctx.textAlign = 'center';
 
     const cardW = this.logicalWidth * 0.86;
-    const cardH = 220;
+    const textMaxWidth = cardW - 40;
+    const subtitleLineHeight = 17;
+    const footerLineHeight = 17;
+
+    // `footer` carries a level's own introText on the START banner, which
+    // can run well past one line (unlike the always-short GAMEOVER/
+    // LEVEL_COMPLETE footers, "Best score: N" / "Score: N") — measure both
+    // subtitle and footer's actual wrap BEFORE laying out anything, so the
+    // card grows to fit instead of the two ever overlapping or footer
+    // silently overflowing un-wrapped past the card's edges.
+    ctx.font = '600 13px sans-serif';
+    const subtitleLines = wrapLines(ctx, subtitle, textMaxWidth);
+    ctx.font = '700 13px sans-serif';
+    const footerLines = wrapLines(ctx, footer, textMaxWidth);
+
+    // Original fixed layout assumed exactly one line each for subtitle and
+    // footer — keep that layout pixel-identical in the common case, and
+    // only grow the card (pushing everything below down with it) by
+    // whatever extra lines wrapping actually needed.
+    const extraHeight = (subtitleLines.length - 1) * subtitleLineHeight + (footerLines.length - 1) * footerLineHeight;
+    const cardH = 220 + extraHeight;
+    const footerY = 112 + (subtitleLines.length - 1) * subtitleLineHeight;
+    const helperY = 138 + extraHeight;
     const cardX = (this.logicalWidth - cardW) / 2;
     const cardY = this.logicalHeight * 0.3;
 
@@ -988,15 +1010,15 @@ export class HedgehoggerGame {
 
     ctx.fillStyle = '#f4a261';
     ctx.font = '600 13px sans-serif';
-    wrapText(ctx, subtitle, this.logicalWidth / 2, cardY + 68, cardW - 40, 17);
+    drawLines(ctx, subtitleLines, this.logicalWidth / 2, cardY + 68, subtitleLineHeight);
 
     ctx.fillStyle = '#e9c46a';
     ctx.font = '700 13px sans-serif';
-    ctx.fillText(footer, this.logicalWidth / 2, cardY + 112);
+    drawLines(ctx, footerLines, this.logicalWidth / 2, cardY + footerY, footerLineHeight);
 
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.font = '500 11px sans-serif';
-    ctx.fillText('Swipe to hop · double-tap to roll through danger', this.logicalWidth / 2, cardY + 138);
+    ctx.fillText('Swipe to hop · double-tap to roll through danger', this.logicalWidth / 2, cardY + helperY);
 
     ctx.fillStyle = '#e63946';
     ctx.beginPath();
@@ -1020,19 +1042,28 @@ export class HedgehoggerGame {
   }
 }
 
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+// Pure word-wrap: requires `ctx.font` to already be set to whatever it'll
+// actually be drawn with (measureText() reads the current font), and
+// returns line strings only — never draws — so callers can measure a
+// banner's actual wrapped height (see renderBanner()) before laying out
+// anything below it.
+function wrapLines(ctx, text, maxWidth) {
   const words = text.split(' ');
+  const lines = [];
   let line = '';
-  let cy = y;
   for (const word of words) {
     const test = line ? `${line} ${word}` : word;
     if (ctx.measureText(test).width > maxWidth && line) {
-      ctx.fillText(line, x, cy);
+      lines.push(line);
       line = word;
-      cy += lineHeight;
     } else {
       line = test;
     }
   }
-  ctx.fillText(line, x, cy);
+  lines.push(line);
+  return lines;
+}
+
+function drawLines(ctx, lines, x, y, lineHeight) {
+  lines.forEach((line, i) => ctx.fillText(line, x, y + i * lineHeight));
 }

@@ -320,7 +320,16 @@ export class HedgehoggerGame {
       // Keep it a plain, always-truthy `{ready:false}` marker (not `null`)
       // so render3DFrame()'s `renderer3D?.ready` check can permanently and
       // cheaply resolve to the 2D fallback path without ever retrying.
-      this.renderer3D = { ready: false, failed: true };
+      //
+      // handleResize() must still be a real (no-op) method here, not just
+      // omitted: resize() calls `this.renderer3D?.handleResize(...)`
+      // unconditionally for any render3D level regardless of load success —
+      // `?.` only guards `renderer3D` itself being null/undefined, not a
+      // missing method being called, so leaving this object without one
+      // threw on the very next resize() (including the one inside the next
+      // setLevel(), i.e. replaying the level) and corrupted resetRun()
+      // partway through, a real bug this shipped with once.
+      this.renderer3D = { ready: false, failed: true, handleResize() {} };
     }
   }
 

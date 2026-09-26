@@ -10,8 +10,13 @@ same VPS. Built with zero dependencies and no build step (plain ES modules, load
 browser) — the only tooling in this repo is for tests and deployment, not the game itself. Level
 4 is a single, deliberate, scoped exception to "zero dependencies" — see "Mechanic spec: the
 third-dimension shift (Level 4)" below — but it's still no-build-step: `js/renderer3d.js` is the
-only file that touches its one dependency, loaded as a pinned-version ES module straight from a
-CDN, not bundled or added to `package.json`.
+only file that touches its one dependency (Three.js), and it's a **vendored, pinned build checked
+into `js/vendor/`**, not a CDN import and not added to `package.json`. This isn't a style
+preference — prismreference.com serves every response with a strict CSP (`script-src 'self'`,
+confirmed via `curl -I https://prismreference.com/`), which silently blocks any cross-origin
+`import()`. A CDN-hosted Three.js shipped once and quietly degraded Level 4 to its plain 2D
+fallback on the live site with no error visible to a player; see the mechanic spec below for the
+full story, including a second bug that fallback path itself triggered.
 
 ## Design pillars
 
@@ -68,6 +73,8 @@ js/
   renderer3d.js           — Level 4 only: the 3D chase-cam scene (see "Mechanic spec: the
                             third-dimension shift" below) — the repo's one Three.js dependency lives
                             entirely in this file
+  vendor/three.module.min.js — the vendored, pinned Three.js build itself (same-origin, checked
+                            into the repo — see why in the mechanic spec below)
   level-utils.js          — shared level-authoring helpers (e.g. `evenlySpaced` obstacle placement)
   level1.js, level2.js, level3.js, level4.js, ...  — one file per level, pure declarative data
 tests/                — Playwright test suite (see "Fairness testing" below)
@@ -184,8 +191,10 @@ codified as real committed tests rather than ad-hoc scripts:
    spec.js`/`tests/fairness.spec.js` simply include `'level4'` in their existing level lists, and
    `tests/chaser.spec.js` loops over every level that has a `chaser` config. None of this suite
    ever calls the engine's `render()` — every one of these tests drives `update()`/`performMove()`/
-   `setLevel()` directly — so Level 4's one dependency (Three.js, fetched from a CDN only inside
-   `js/renderer3d.js`'s `init()`) is never touched by `npm test`, and CI stays fully offline. What
+   `setLevel()` directly — so Level 4's one dependency (a same-origin vendored Three.js build,
+   loaded only inside `js/renderer3d.js`'s `init()`) is never touched by `npm test`, and CI stays
+   fully offline (the load doesn't even need external network access any more — see the mechanic
+   spec below for why it's vendored, not CDN-loaded). What
    this suite structurally *cannot* check is whether the 3D chase camera itself keeps enough of the
    board on screen to satisfy rule 3 — it only ever queries engine state, never pixels or camera
    framing — so that one property is a manual-playtest sign-off, not an automated guarantee; see
@@ -354,17 +363,44 @@ parallel test suite.
 - **Dying and retrying mid-level skips the cinematic** — `GAMEOVER` always goes straight back to
   `beginPlaying()`. The cinematic is a one-time, level-start-only beat, not something replayed on
   every death.
-- **The Three.js CDN fetch is deliberately isolated and deferred**, both for the "zero
-  dependencies" exception's own sake and for CI: `js/renderer3d.js` is the only file that ever
-  imports it, and only inside its `init()` method — never at module load time. `engine.js` only
-  ever calls `ensureRenderer3D()` (which calls `init()`) from `startLevel()` (prewarms while the
-  player's reading the START banner) and, as a safety net, from the real `onPrimary()` tap handler
-  — **never** from `setLevel()` or `update()`. That's what keeps every existing/extended automated
-  test offline: they all drive the engine via direct `setLevel()`/`update()`/`performMove()` calls,
-  never through the hub tap or `onPrimary()`, so `npm test` never fetches the CDN module. If the
-  fetch fails (or hasn't finished by tap time), `render()` holds on the plain 2D frame — the
-  `ENTERING_3D` timer keeps running renderer-agnostically regardless, so the game can't soft-lock;
-  a permanent failure just degrades the rest of that run to the ordinary 2D path, level 1-3 style.
+- **Three.js is vendored (`js/vendor/three.module.min.js`), not CDN-loaded** — a real bug shipped
+  once because of this: the first version of this feature loaded Three.js from a CDN
+  (`cdn.jsdelivr.net`), which worked in every local/manual/automated check but silently failed on
+  the actual live site, because prismreference.com serves every response with a strict CSP
+  (`script-src 'self'` — confirmed with `curl -I https://prismreference.com/`), which blocks a
+  cross-origin `import()` outright with no exception surfaced to the page beyond a console error.
+  The result: Level 4 quietly fell back to its plain 2D rendering path in production — "the same as
+  Level 3, in 2D" — exactly the kind of bug this repo's whole testing philosophy warns about
+  finding *after* it ships, because nothing in local dev or CI has that CSP, so nothing caught it
+  before a real player did. The fix is to vendor the exact build Three.js publishes for CDN use
+  (`three.module.min.js`, unmodified, MIT-licensed) as a same-origin static file, imported via a
+  relative URL (`new URL('./vendor/three.module.min.js', import.meta.url)`) instead of a CDN
+  specifier — same "no build step" property, same pinned-version discipline, just same-origin, so
+  `script-src 'self'` allows it. **Bumping the vendored version is a deliberate, re-tested action**
+  (re-download the file, re-run `npm test`, re-verify against a real CSP if possible) — not a
+  routine dependency bump.
+- **The Three.js load is still isolated and deferred**, both for the "zero dependencies" exception's
+  own sake and for CI: `js/renderer3d.js` is the only file that ever imports it, and only inside its
+  `init()` method — never at module load time. `engine.js` only ever calls `ensureRenderer3D()`
+  (which calls `init()`) from `startLevel()` (prewarms while the player's reading the START banner)
+  and, as a safety net, from the real `onPrimary()` tap handler — **never** from `setLevel()` or
+  `update()`. That's what keeps every existing/extended automated test offline: they all drive the
+  engine via direct `setLevel()`/`update()`/`performMove()` calls, never through the hub tap or
+  `onPrimary()`, so `npm test` never even requests the vendored module. If the load fails (or hasn't
+  finished by tap time), `render()` holds on the plain 2D frame — the `ENTERING_3D` timer keeps
+  running renderer-agnostically regardless, so the game can't soft-lock; a permanent failure just
+  degrades the rest of that run to the ordinary 2D path, level 1-3 style. **A second real bug lived
+  in exactly this fallback**: `ensureRenderer3D()`'s catch branch replaced `this.renderer3D` with a
+  plain `{ready: false}` marker object, but `resize()` calls
+  `this.renderer3D?.handleResize(...)` unconditionally for any `render3D` level — `?.` only guards
+  `renderer3D` itself being null/undefined, not a *missing method* being called on it — so the very
+  next `resize()` (which runs inside `setLevel()`, before `resetRun()`) threw, and `resetRun()`
+  never ran. A player who won Level 4 (the CDN bug above meant this was the *only* way anyone hit
+  it) and then retried from the hub got stuck re-shown the previous run's stale `LEVEL_COMPLETE`
+  banner, with no way to actually play again. Fixed by giving that fallback object a real (no-op)
+  `handleResize()`; see `tests/level4-renderer-fallback.spec.js`, which reproduces the failure via
+  Playwright request interception (not a hand-asserted object shape) so it would have caught both
+  the original crash and any future regression in the same catch branch.
 - **The chase camera is tuned for fairness first, cinematics second.** A close third-person
   perspective fundamentally shows less of the board at once than the old full-lane-width top-down
   view — far lanes converge toward a vanishing point, and a tight/narrow lens can hide hazards near

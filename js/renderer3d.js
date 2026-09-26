@@ -5,22 +5,31 @@
  * of the game's rules. See docs/design.md's "Mechanic spec: the
  * third-dimension shift (Level 4)" for the full design rationale.
  *
- * This is the ONLY file in the repo that touches Three.js, and the CDN
- * import below is deliberately inside init() (an async method), never at
- * module top-level — the module itself is a normal, zero-cost, same-origin
- * static import (engine.js imports it unconditionally), but the actual
- * network fetch of Three.js only happens the first time init() runs, which
- * only ever happens for a `render3D` level, and only from the real
- * hub-tap/tap-to-play flow (see engine.js's ensureRenderer3D()) — never from
- * any automated test, which all drive the engine via direct state
- * manipulation and never reach that path.
+ * This is the ONLY file in the repo that touches Three.js. It's a vendored,
+ * pinned build checked into `js/vendor/` (`THREE_MODULE_URL` below, a
+ * relative same-origin import), NOT loaded from a CDN — prismreference.com
+ * (this game's deploy target) serves every response with a strict CSP
+ * (`script-src 'self'`), which would silently block a cross-origin
+ * `import()` outright. This was the actual cause of a real shipped bug:
+ * Level 4 fell back to its plain 2D rendering path on the live site (the
+ * CDN import rejected, tripping ensureRenderer3D()'s catch branch) — see
+ * docs/design.md's Level 4 mechanic spec for the full story.
+ *
+ * The import below is still deliberately inside init() (an async method),
+ * never at module top-level — the module itself is a normal, zero-cost,
+ * same-origin static import (engine.js imports it unconditionally), but the
+ * actual load only happens the first time init() runs, which only ever
+ * happens for a `render3D` level, and only from the real hub-tap/tap-to-play
+ * flow (see engine.js's ensureRenderer3D()) — never from any automated test,
+ * which all drive the engine via direct state manipulation and never reach
+ * that path.
  *
  * Kept deliberately asset-free (no textures, no GLTF/model pipeline) in the
  * same spirit as sprites.js's "every visual is drawn fresh from plain
  * numbers" philosophy — every mesh here is composed from primitives.
  */
 
-const THREE_CDN_URL = 'https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js';
+const THREE_MODULE_URL = new URL('./vendor/three.module.min.js', import.meta.url);
 
 // Chase-camera geometry, expressed in laneSize units so it scales with any
 // level's grid — see docs/design.md for the fairness rationale behind these
@@ -182,7 +191,7 @@ export class Renderer3D {
   }
 
   async init(level, logicalWidth, logicalHeight, dpr) {
-    const THREE = await import(THREE_CDN_URL);
+    const THREE = await import(THREE_MODULE_URL);
     this.THREE = THREE;
     this.laneSize = level.laneSize;
     this.gridWidth = level.cols * level.laneSize;
